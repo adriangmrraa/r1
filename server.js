@@ -13,6 +13,8 @@ import * as dotenv from "dotenv";
 
 dotenv.config();
 
+// Este es un cambio para activar un nuevo despliegue en Netlify
+
 // Configuración para obtener el directorio actual en ES Modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
