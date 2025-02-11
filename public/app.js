@@ -13,7 +13,7 @@ document
     formData.append("description", descriptionInput.value);
 
     // Enviar la imagen al servidor para que sea procesada
-    fetch("/.netlify/functions/generate-post", {
+    fetch("/.netlify/functions/generate_post", {
       method: "POST",
       body: formData,
     })
