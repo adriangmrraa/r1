@@ -104,58 +104,56 @@ document
           } else {
             document.getElementById("errorMessage").style.display = "none";
             const imageBase64 = data.image;
-            const imageUrl = `data:image/png;base64,${imageBase64}`;
-            document.getElementById("generatedImage").src = imageUrl;
+            const processedImageUrl = `data:image/png;base64,${imageBase64}`;
+            document.getElementById("generatedImage").src = processedImageUrl;
             document.getElementById("generatedImage").style.display = "block";
 
-            document.getElementById("downloadLink").href = imageUrl;
+            document.getElementById("downloadLink").href = processedImageUrl;
             document.getElementById("downloadLink").style.display = "block";
 
             document.getElementById("sendWebhookBtn").style.display = "block";
 
-            // Event listener para el botón "Publicar en Facebook e Instagram"
-            document
-              .getElementById("sendWebhookBtn")
-              .addEventListener("click", function () {
-                const webhookData = {
-                  title: titleInput.value,
-                  description: descriptionInput.value,
-                  imageUrl: imageUrl, // Usar la URL de datos
-                  image: imageBase64, // Enviar la imagen en base64
-                };
+            // Asignar la función al onclick del botón (CORREGIDO)
+            document.getElementById("sendWebhookBtn").onclick = function () {
+              const webhookData = {
+                title: titleInput.value,
+                description: descriptionInput.value,
+                imageUrl: imageUrl, // Usar la URL de datos original
+                image: imageBase64, // Enviar la imagen en base64
+              };
 
-                // Enviar los datos al webhook
-                fetch("/.netlify/functions/send_webhook", {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify(webhookData),
-                })
-                  .then((response) => response.json())
-                  .then((data) => {
-                    if (data.error) {
-                      console.error("Error al enviar el webhook:", data.error);
-                      document.getElementById("errorMessage").textContent =
-                        "Error al enviar el webhook: " + data.error;
-                      document.getElementById("errorMessage").style.display =
-                        "block";
-                    } else {
-                      console.log("Webhook enviado con éxito", data);
-                      document.getElementById("successMessage").textContent =
-                        "Webhook enviado con éxito";
-                      document.getElementById("successMessage").style.display =
-                        "block";
-                    }
-                  })
-                  .catch((error) => {
-                    console.error("Error al enviar el webhook:", error);
+              // Enviar los datos al webhook
+              fetch("/.netlify/functions/send_webhook", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify(webhookData),
+              })
+                .then((response) => response.json())
+                .then((data) => {
+                  if (data.error) {
+                    console.error("Error al enviar el webhook:", data.error);
                     document.getElementById("errorMessage").textContent =
-                      "Error al enviar el webhook: " + error.message;
+                      "Error al enviar el webhook: " + data.error;
                     document.getElementById("errorMessage").style.display =
                       "block";
-                  });
-              });
+                  } else {
+                    console.log("Webhook enviado con éxito", data);
+                    document.getElementById("successMessage").textContent =
+                      "Webhook enviado con éxito";
+                    document.getElementById("successMessage").style.display =
+                      "block";
+                  }
+                })
+                .catch((error) => {
+                  console.error("Error al enviar el webhook:", error);
+                  document.getElementById("errorMessage").textContent =
+                    "Error al enviar el webhook: " + error.message;
+                  document.getElementById("errorMessage").style.display =
+                    "block";
+                });
+            };
           }
         })
         .catch((error) => {
