@@ -1,23 +1,18 @@
-import express from "express";
-import multer from "multer";
-import path from "path";
-import fs from "fs";
 import { createCanvas, loadImage, registerFont } from "canvas";
 import sharp from "sharp";
 import { v4 as uuidv4 } from "uuid";
+import path from "path";
+import fs from "fs"; // Importa el módulo 'fs'
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 import { google } from "googleapis";
 import axios from "axios";
-import mime from "mime-types";
+import mime from "mime-types"; // Asegúrate de tener esta dependencia instalada
 import * as dotenv from "dotenv";
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-const app = express();
-const upload = multer({ dest: "uploads/" });
 
 // Definir los permisos necesarios y las credenciales de Google
 const SCOPES = ["https://www.googleapis.com/auth/drive.file"];
@@ -30,11 +25,16 @@ async function authorize() {
     process.env.GOOGLE_APPLICATION_CREDENTIALS_PRIVATE_KEY.replace(
       /\\n/g,
       "\n"
-    ); // Importante: Reemplaza los saltos de línea escapados
+    );
 
   if (!client_email || !private_key) {
     console.error("Error: Missing Google credentials in .env file.");
-    throw new Error("Missing Google credentials in .env file.");
+    return {
+      statusCode: 500,
+      body: JSON.stringify({
+        error: "Missing Google credentials in .env file.",
+      }),
+    };
   }
 
   const auth = new google.auth.JWT(client_email, null, private_key, SCOPES);
@@ -42,18 +42,19 @@ async function authorize() {
 }
 
 // Subir archivo a Google Drive
-async function uploadFile(auth, filePath) {
+async function uploadFile(auth, imageBuffer, imageName) {
+  // Modificado: Recibe el buffer y el nombre
   const drive = google.drive({ version: "v3", auth });
 
   // Metadatos del archivo a subir
   const fileMetadata = {
-    name: path.basename(filePath), // Nombre del archivo subido
+    name: imageName, // Usa el nombre proporcionado
     parents: [FOLDER_ID], // ID de la carpeta en Google Drive donde se subirá el archivo
   };
 
   const media = {
     mimeType: "image/png", // Cambia el mimeType si subes otro tipo de archivo
-    body: fs.createReadStream(filePath),
+    body: imageBuffer, // Usa el buffer directamente
   };
 
   try {
@@ -74,29 +75,26 @@ async function uploadFile(auth, filePath) {
 }
 
 // Procesamiento de la imagen (Sharp + Canvas)
-async function processImage(imagePath, title, logoPath) {
+async function processImage(imageUrl, title, logoPath) {
+  // Modificado: Recibe la URL de la imagen
   console.log("Iniciando el procesamiento de la imagen...");
 
-  const uniqueId = uuidv4();
-  const resizedImagePath = path.join(
-    __dirname,
-    "output", // Asegúrate de que "output" sea el directorio correcto
-    `resized_${uniqueId}.jpg`
-  );
-  const finalImagePath = path.join(
-    __dirname,
-    "output",
-    `final_${uniqueId}.jpg`
-  );
-
   try {
+    // Descarga la imagen desde la URL
+    const imageResponse = await axios.get(imageUrl, {
+      responseType: "arraybuffer",
+    });
+    const imageBuffer = Buffer.from(imageResponse.data, "binary");
+    console.log("Imagen descargada con éxito");
     // Redimensionamos la imagen original con Sharp
     console.log("Redimensionando imagen con Sharp...");
-    await sharp(imagePath).resize(1080, 1080).toFile(resizedImagePath);
+    const resizedImageBuffer = await sharp(imageBuffer)
+      .resize(1080, 1080)
+      .toBuffer();
 
     // Cargamos la imagen redimensionada en Canvas
     console.log("Cargando imagen en Canvas...");
-    const image = await loadImage(resizedImagePath);
+    const image = await loadImage(resizedImageBuffer);
     const canvas = createCanvas(1080, 1080);
     const ctx = canvas.getContext("2d");
 
@@ -113,10 +111,9 @@ async function processImage(imagePath, title, logoPath) {
 
     // Configura la fuente y el estilo del texto
     console.log("Configurando la fuente...");
-    registerFont(
-      "C:\\Users\\adria\\AppData\\Local\\Microsoft\\Windows\\Fonts\\BebasKai.ttf",
-      { family: "Bebas Kai" }
-    );
+    registerFont(path.resolve(__dirname, "BebasKai.ttf"), {
+      family: "Bebas Kai",
+    }); // Fuente relativa
     ctx.font = 'bold 70px "Bebas Kai"';
     ctx.fillStyle = "white";
     ctx.textAlign = "center";
@@ -156,33 +153,24 @@ async function processImage(imagePath, title, logoPath) {
 
     // Dibuja el logo en el canvas
     console.log("Agregando el logo al canvas...");
-    const logo = await loadImage(logoPath);
+    const logo = await loadImage(path.resolve(__dirname, "logo.png")); // Logo relativo
     const logoWidth = 150;
     const logoHeight = (logo.height / logo.width) * logoWidth;
     ctx.drawImage(logo, 1080 - logoWidth - 10, 10, logoWidth, logoHeight);
 
     // Guarda la imagen final procesada
-    console.log("Guardando la imagen final procesada...");
+    console.log("Convirtiendo la imagen final procesada a buffer...");
     const buffer = canvas.toBuffer("image/png");
-    await fs.promises.writeFile(finalImagePath, buffer);
 
-    // Elimina la imagen redimensionada temporal
-    fs.unlinkSync(resizedImagePath);
+    console.log("Buffer creado con éxito");
 
-    console.log("Imagen final guardada en:", finalImagePath);
-
-    // Regresa la URL local para la visualización y la ruta completa para la subida al drive
+    // Regresa el buffer de la imagen final
     return {
-      imageLocalUrl: `/output/final_${uniqueId}.jpg`, // URL local para visualización
-      finalImagePath, // Ruta completa para la subida al drive
+      imageBuffer: buffer,
     };
   } catch (error) {
     console.error("Error en processImage:", error);
     console.trace();
-    // Si falla algo, asegúrate de eliminar la imagen redimensionada
-    if (fs.existsSync(resizedImagePath)) {
-      fs.unlinkSync(resizedImagePath);
-    }
     throw error;
   }
 }
@@ -194,7 +182,7 @@ async function sendToWebhook(note) {
     const webhookUrl = process.env.WEBHOOK_URL; // Coloca aquí tu URL del webhook
     const response = await axios.post(webhookUrl, {
       title: note.title,
-      datePublished: note.datePublished,
+      datePublished: new Date().toISOString(),
       content: note.content,
       imageUrl: note.imageUrl, // Esta es la URL de la imagen procesada (puede ser de Google Drive)
       linkUrl: note.linkUrl, // Usamos la misma URL para el link (puedes cambiar esto si necesitas un enlace diferente)
@@ -218,40 +206,52 @@ async function sendToWebhook(note) {
 
 export const handler = async (event, context) => {
   try {
-    // Configurar el middleware para parsear JSON
-    app.use(express.json());
-    app.use(express.static("public"));
-    app.use("/output", express.static(path.join(__dirname, "output"))); // Hacemos que el directorio 'output' sea accesible
+    console.log("Función generate_post ejecutada");
 
-    if (event.path === "/generate") {
-      const { title, description } = JSON.parse(event.body);
-      const imagePath = event.multiValueHeaders.image[0];
-      const logoPath = path.join(__dirname, "logo.png"); // Asegúrate de tener el logo
+    if (event.httpMethod !== "POST") {
+      return {
+        statusCode: 405,
+        body: JSON.stringify({ message: "Method Not Allowed" }),
+      };
+    }
 
-      // Procesar la imagen
-      const { imageLocalUrl, finalImagePath } = await processImage(
-        imagePath,
-        title,
-        logoPath
-      );
+    if (event.path === "/.netlify/functions/generate_post") {
+      // Corregido
+      console.log("Endpoint /generate_post llamado");
+      const { title, imageUrl } = JSON.parse(event.body); // Recibe imageUrl en lugar de image
+      console.log("Título:", title);
+      console.log("URL de la imagen:", imageUrl);
+      const logoPath = path.resolve(__dirname, "logo.png"); // Ruta relativa al logo
+
+      console.log("Ruta del logo:", logoPath);
+
+      // Procesa la imagen
+      const { imageBuffer } = await processImage(imageUrl, title, logoPath);
+
+      // Convierte el buffer a base64
+      const imageBase64 = imageBuffer.toString("base64");
+
+      console.log("Imagen procesada y convertida a base64");
 
       return {
         statusCode: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*", // ¡Cuidado en producción!
+        },
         body: JSON.stringify({
-          imageUrl: imageLocalUrl, // URL local para visualización en frontend
-          title,
-          description,
-          finalImagePath, // Ruta completa para la subida a Google Drive
+          image: imageBase64, // Enviar la imagen en base64
         }),
       };
     }
 
-    if (event.path === "/sendWebhook") {
+    if (event.path === "/.netlify/functions/sendWebhook") {
+      // Extrae los datos del cuerpo de la solicitud
       const { title, description, imageUrl, finalImagePath } = JSON.parse(
         event.body
       );
 
-      // Verificar si finalImagePath está correctamente recibido
+      // Verifica si finalImagePath está correctamente recibido
       if (!finalImagePath) {
         console.error("Error: finalImagePath is missing in the request.");
         return {
@@ -307,7 +307,7 @@ export const handler = async (event, context) => {
     console.error("Error:", error);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: "Internal Server Error" }),
+      body: JSON.stringify({ error: error.message }),
     };
   }
 };
